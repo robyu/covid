@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 from datetime import datetime
 def datestring_to_daynum(datestring):
@@ -11,7 +12,7 @@ def datestring_to_daynum(datestring):
 def datestring_to_timestamp(datestring,format='%Y-%m-%d'):
    return pd.to_datetime(datestring, format=format)
 
-def calc_delta_over_daynum(df, locale, srccol, destcol, floorval=0.0):
+def calc_delta_over_daynum(df, county, state, srccol, destcol, floorval=0.0):
   """
   given a dataframe df and the locale, 
   compute dcases = deltacases = new cases daily
@@ -19,13 +20,15 @@ def calc_delta_over_daynum(df, locale, srccol, destcol, floorval=0.0):
 
   TODO: replace w/ rolling
   """
-  assert srccol in df
+  assert "county" in df
+  assert "state" in df
   # add new column
   if destcol not in df:
     df[destcol] = 0.0
   #end
 
-  tmp_df = df[df.county==locale].sort_values('daynum',ascending=True)
+  indices= (df.county==county) & (df.state==state)
+  tmp_df = df[indices].sort_values('daynum',ascending=True)
   assert(len(tmp_df)>0)
   x = tmp_df[srccol]
   h = np.array([+1.0,-1.0])
@@ -37,54 +40,88 @@ def calc_delta_over_daynum(df, locale, srccol, destcol, floorval=0.0):
   floorvec = floorval * np.ones(delta.shape,dtype='float')
   assert(floorvec.shape==delta.shape)
   deltamax=np.maximum(floorvec, delta)
-  tmp_df[destcol] = deltamax
+  #tmp_df[destcol] = deltamax
 
-  # assign nd values back into df by overwriting rows
-  df.loc[df['county']==locale,:] = tmp_df
+  # assign nd values back into df 
+  df.loc[indices,destcol] = deltamax
   return df
 
-import sys
-def calc_growthfactor(df, locale):
+def scale_col_values(df, county, state, scalef, srccol, destcol):
   """
-  calc growth factor per day
-  """
-  MIN_FLOAT=1.0e-10
-  if 'growthf' not in df:
-    # add new column
-    df['growthf'] = 0.0
-  #end
+  given a dataframe df and the locale, 
+  compute dcases = deltacases = new cases daily
+  returns updated df
 
-  tmp_df = df[df.county==locale].sort_values('daynum',ascending=True)
-  #print(tmp_df.tail())
-  assert(len(tmp_df)>0)
-  start_daynum = tmp_df['daynum'].min()
-  stop_daynum = tmp_df['daynum'].max()
-  daynum_list=np.arange(start_daynum+1, stop_daynum+1)
-  gf_list=[0.0]  # the first growthf value
-  for daynum in daynum_list:
-    dn = tmp_df[tmp_df.daynum==daynum].dcases
-    dn1 = tmp_df[tmp_df.daynum==daynum-1].dcases
-    #gf =sys.float_info.min
-    gf = float(dn)/( float(dn1) + MIN_FLOAT)
-    gf_list.append( gf )
-    #print(f"day {daynum} dn={float(dn)}/dn1={float(dn1)} + {MIN_FLOAT}-> gf={gf}")
-  #end
-  tmp_df["growthf"] = gf_list
-  #print(tmp_df.head())
-
-  # assign nd values back into df by overwriting rows
-  df.loc[df.county==locale,:] = tmp_df
-  return df
-
-def avg_over_daynum(df,locale, srccol, numpoints, destcol):
+  TODO: replace w/ rolling
   """
-  average srccol over daynum, write result to destcol
-  """
+  assert "county" in df
+  assert "state" in df
   assert srccol in df
+  assert scalef >= 0.0
+  # add new column
   if destcol not in df:
     df[destcol] = 0.0
   #end
-  tmp_df = df[df.county==locale].sort_values('daynum',ascending=True)
+
+  indices= (df.county==county) & (df.state==state)
+  tmp_df = df.loc[indices,srccol]
+  assert(len(tmp_df)>0)
+  
+  x = df.loc[indices,srccol]
+  y = scalef * x
+
+  # assign nd values back into df 
+  df.loc[indices,destcol] = y
+  return df
+
+
+import sys
+def calc_growthfactor(df, county, state,destcol='growthfactor'):
+    """
+    given county + state,
+    calc growth factor per day, write to column 'growthfactor'
+    """
+    MIN_FLOAT=1.0e-10
+    if destcol not in df:
+        # add new column
+        df[destcol] = 0.0
+    #end
+
+    indices = (df.county==county) & (df.state==state)
+    tmp_df = df[indices].sort_values('daynum',ascending=True)
+    #print(tmp_df.tail())
+    assert(len(tmp_df)>0)
+    start_daynum = tmp_df['daynum'].min()
+    stop_daynum = tmp_df['daynum'].max()
+    daynum_list=np.arange(start_daynum+1, stop_daynum+1)
+    gf_list=[0.0]  # the first growthf value
+    for daynum in daynum_list:
+       dn = tmp_df[tmp_df.daynum==daynum].dcases.values[0]
+       dn1 = tmp_df[tmp_df.daynum==daynum-1].dcases.values[0]
+       #print(f"dn={dn}, dn1={dn1}")
+       gf = float(dn)/( float(dn1) + MIN_FLOAT)
+       gf_list.append( gf )
+    #end
+    #tmp_df["growthf"] = gf_list
+    #print(tmp_df.head())
+
+    # assign nd values back into df by overwriting rows
+    # print(f"len(df.loc) = {len(df.loc[indices,destcol])}")
+    # print(f"len(gf_list) = {len(gf_list)}")
+    # print(f"len(daynum_list) = {len(daynum_list)}")
+    
+    df.loc[indices,destcol] = gf_list
+    return df
+
+def avg_over_daynum(df,county, state, srccol, numpoints):
+  """
+  average srccol over daynum, return series
+  """
+  assert srccol in df
+  
+  indices = (df.county==county) & (df.state==state)
+  
+  tmp_df = df[indices].sort_values('daynum',ascending=True)
   assert(len(tmp_df)>0)
   #print(tmp_df.tail())
   x = tmp_df[srccol]
@@ -92,11 +129,7 @@ def avg_over_daynum(df,locale, srccol, numpoints, destcol):
 
   filtered = np.convolve(h,x,mode='same')
 
-  tmp_df[destcol] = filtered
-  #print(tmp_df.tail())
-  # assign nd values back into df by overwriting rows
-  df.loc[df['county']==locale,:] = tmp_df
-  return df
+  return filtered
 
 def split_county_state(df):
     """split county+state into two different columns
@@ -165,6 +198,14 @@ def strip_trailing_county(df,colname):
     df[colname] = pd.Series(fixed_list)
     return df
 
+def do_misc_nyt_fixup(df):
+    ret_df = df.copy()
+
+    # 4/6/2020 entries: 'new york city' is entered as 'new york'
+    indices=(df.county=='new york') & (df.county=='new york')
+    ret_df.loc[indices,'county'] = 'new york city'
+    return ret_df
+    
 def do_misc_census_fixup(df):
     """
     do miscellaneous fix of census data
@@ -234,3 +275,63 @@ def validate_county_match(nyt_df, census_df):
         #end
     #end            
     return mismatch_list
+
+def fix_date(nyt_df):
+    """
+    convert datestring column to timestamp, 'tstamp'
+    convert datestring column to daynum, 'daynum'
+    delete 'date' column
+    """
+    ret_df = nyt_df.copy()
+    if 'date' in ret_df:
+        ret_df['tstamp'] = [datestring_to_timestamp(d) for d in ret_df['date']]
+        ret_df['daynum'] = [datestring_to_daynum(d) for d in ret_df['date']]
+
+        ret_df = ret_df.drop(columns=['date'])
+    #end
+    return ret_df
+
+
+        
+def filter_rows_by_state_county(df, cs_list):
+    """
+    given dataframe and list of (county,state) tuples,
+    return a dataframe with just the rows containing (county, state)
+    """
+    ret_df = pd.DataFrame()
+    for county, state in cs_list:
+        sub_df = df.loc[(df.county==county) & (df.state==state)]
+        assert len(sub_df) > 0, f"could not find any rows for ({county},{state})"
+        ret_df = pd.concat([ret_df,sub_df])
+                           
+    #end
+    return ret_df
+
+def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_deaths_name='norm_deaths'):
+    """
+    given nyt and population (census) dataframes,
+    normalize cases by population -> norm_cases
+    and deaths -> norm_deaths
+
+    return dataframe with extra columns "norm_cases" and "norm_deaths"
+    """
+    ret_df = nyt_df.copy()
+    if norm_cases_name not in ret_df:
+        ret_df[norm_cases_name] = 0.0
+    if norm_deaths_name not in ret_df:
+        ret_df[norm_deaths_name] = 00
+        
+    
+    for index,row in ret_df.iterrows():
+        county=row['county']
+        state=row['state']
+        # get population for (county, state)
+        pop_index = get_index_county_state(pop_df, county,state)
+        pop=1.0 * pop_df[pop_index][2019].values[0] 
+
+        deaths = 1.0 * row['deaths']
+        cases = 1.0 * row['cases']
+        ret_df.loc[index,norm_deaths_name] = deaths/pop
+        ret_df.loc[index,norm_cases_name] = cases/pop
+    #end
+    return ret_df
