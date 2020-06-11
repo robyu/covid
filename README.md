@@ -21,7 +21,7 @@ The analysis consists of a jupyter notebook (analyze-nytimes-covid-county.ipynb)
 ## Use
 1. Start up jupyter notebook.
 1. Open analyze-nytimes-covid-county.ipynb
-1. Select Cells->Run Cells
+1. Select Cells->Run All
 * Alternatively, type *Cntrl-Enter* on each cell to run it individually.
 
 

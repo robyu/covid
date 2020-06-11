@@ -334,4 +334,6 @@ def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_dea
         ret_df.loc[index,norm_deaths_name] = deaths/pop
         ret_df.loc[index,norm_cases_name] = cases/pop
     #end
+    print(f"created column {norm_deaths_name}")
+    print(f"created column {norm_cases_name}")
     return ret_df
