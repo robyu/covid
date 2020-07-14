@@ -222,7 +222,14 @@ def do_misc_census_fixup(df):
                            "state":["missouri"],
                            2019: [491918]})
     ret_df = pd.concat([ret_df, tmp_df],sort=False)
-    #ret_df = ret_df.reset_index()
+
+    # joplin, MO falls into multiple counties!
+    # add a new row:  'joplin' county with population data data from internets
+    tmp_df = pd.DataFrame({"county":["joplin"],
+                           "state":["missouri"],
+                           2018: [50657]})
+    ret_df = pd.concat([ret_df, tmp_df],sort=False)
+
     return ret_df
 
 def get_index_county_state(census_df, county, state, smartmatch=True):
@@ -251,8 +258,11 @@ def validate_county_match(nyt_df, census_df):
     #sc_df = pd.DataFrame({"county":["bexar"],"state":"texas",}) # 
     #print(sc_df.tail())
     #return
+
+    # preallocate mismatch_list to avoid append
+    mismatch_list=[None] * len(census_df.index)
+    list_index = 0
     
-    mismatch_list=[]
     #sc_df.loc[(sc_df['county']=='asotin') & (sc_df['state']=='washington')]
     for index,sc_row_df in sc_df.iterrows():
         county=sc_row_df['county']
@@ -266,15 +276,19 @@ def validate_county_match(nyt_df, census_df):
         #print(f"census_df {county},{state}={census_df.loc[census_df['county']==county]}")
         if len(probe) <= 0:
             print(f"could not find population data for {county},{state}")
-            mismatch_list.append((county,state))
+            #mismatch_list.append((county,state))
+            mismatch_list[list_index]=(county,state)
+            list_index += 1
         elif len(probe) > 1:
             print(f"found multiple ({len(probe)}) matches for {county},{state}")
-            mismatch_list.append((county,state))
+            mismatch_list[list_index] = (county,state)
+            #mismatch_list.append((county,state))
+            list_index += 1
         else:
             assert len(probe)==1
         #end
     #end            
-    return mismatch_list
+    return mismatch_list[0:list_index]
 
 def fix_date(nyt_df):
     """
