@@ -1,16 +1,21 @@
 import pandas as pd
 import numpy as np
-
+import sys
+          
 from datetime import datetime
 def datestring_to_daynum(datestring):
-    "given datestring 01/01/2020, return the day number (of year)"
+    "given datestring 01/01/2020, return number of days since linux epoch"
     t = datetime.strptime(datestring, '%Y-%m-%d')
-    datenum = t.timetuple().tm_yday
-    return datenum
+    
+    #datenum = t.timetuple().tm_yday
+    daynum = (t - datetime(1970,1,1)).days
+    #print(f"{datestring} -> {daynum}")
+    return daynum
 
 # convert DATESTRING to proper timestamp
 def datestring_to_timestamp(datestring,format='%Y-%m-%d'):
-   return pd.to_datetime(datestring, format=format)
+    #print(f"datestring_to_timestamp({datestring})")
+    return pd.to_datetime(datestring, format=format)
 
 def calc_delta_over_daynum(df, county, state, srccol, destcol, floorval=0.0):
   """
@@ -89,11 +94,15 @@ def calc_growthfactor(df, county, state,destcol='growthfactor'):
 
     indices = (df.county==county) & (df.state==state)
     tmp_df = df[indices].sort_values('daynum',ascending=True)
-    #print(tmp_df.tail())
+    print(tmp_df.tail())
+    print(len(tmp_df))
     assert(len(tmp_df)>0)
     start_daynum = tmp_df['daynum'].min()
     stop_daynum = tmp_df['daynum'].max()
     daynum_list=np.arange(start_daynum+1, stop_daynum+1)
+    print(daynum_list)
+    assert len(daynum_list)==len(tmp_df), f"len(daynum_list)={len(daynum_list)}, len(tmp_df) = {len(tmp_df)}"
+    
     gf_list=[0.0]  # the first growthf value
     for daynum in daynum_list:
        dn = tmp_df[tmp_df.daynum==daynum].dcases.values[0]
@@ -107,29 +116,30 @@ def calc_growthfactor(df, county, state,destcol='growthfactor'):
 
     # assign nd values back into df by overwriting rows
     # print(f"len(df.loc) = {len(df.loc[indices,destcol])}")
-    # print(f"len(gf_list) = {len(gf_list)}")
+    print(f"{len(df.loc[indices,destcol])} =?= {len(gf_list)}")
+    assert len(df.loc[indices,destcol]) == len(gf_list)
     # print(f"len(daynum_list) = {len(daynum_list)}")
     
     df.loc[indices,destcol] = gf_list
     return df
 
-def avg_over_daynum(df,county, state, srccol, numpoints):
-  """
-  average srccol over daynum, return series
-  """
-  assert srccol in df
+# def avg_over_daynum(df,county, state, srccol, numpoints):
+#   """
+#   average srccol over daynum, return series
+#   """
+#   assert srccol in df
   
-  indices = (df.county==county) & (df.state==state)
+#   indices = (df.county==county) & (df.state==state)
   
-  tmp_df = df[indices].sort_values('daynum',ascending=True)
-  assert(len(tmp_df)>0)
-  #print(tmp_df.tail())
-  x = tmp_df[srccol]
-  h = np.array([1.0/numpoints] * numpoints)
+#   tmp_df = df[indices].sort_values('daynum',ascending=True)
+#   assert(len(tmp_df)>0)
+#   #print(tmp_df.tail())
+#   x = tmp_df[srccol]
+#   h = np.array([1.0/numpoints] * numpoints)
 
-  filtered = np.convolve(h,x,mode='same')
+#   filtered = np.convolve(h,x,mode='same')
 
-  return filtered
+#   return filtered
 
 def split_county_state(df):
     """split county+state into two different columns
@@ -275,12 +285,12 @@ def validate_county_match(nyt_df, census_df):
         #print(f"{probe}")
         #print(f"census_df {county},{state}={census_df.loc[census_df['county']==county]}")
         if len(probe) <= 0:
-            print(f"could not find population data for {county},{state}")
+            #print(f"could not find population data for {county},{state}")
             #mismatch_list.append((county,state))
             mismatch_list[list_index]=(county,state)
             list_index += 1
         elif len(probe) > 1:
-            print(f"found multiple ({len(probe)}) matches for {county},{state}")
+            #print(f"found multiple ({len(probe)}) matches for {county},{state}")
             mismatch_list[list_index] = (county,state)
             #mismatch_list.append((county,state))
             list_index += 1
@@ -294,15 +304,30 @@ def fix_date(nyt_df):
     """
     convert datestring column to timestamp, 'tstamp'
     convert datestring column to daynum, 'daynum'
-    delete 'date' column
     """
     ret_df = nyt_df.copy()
-    if 'date' in ret_df:
-        ret_df['tstamp'] = [datestring_to_timestamp(d) for d in ret_df['date']]
-        ret_df['daynum'] = [datestring_to_daynum(d) for d in ret_df['date']]
 
-        ret_df = ret_df.drop(columns=['date'])
+    #
+    # add new columns
+    ret_df['tstamp'] = 0.0
+    ret_df['daynum'] = 0.0
+    
+    date_list = ret_df['date'].unique()
+
+    count = 0
+    for date in date_list:
+        ts  = datestring_to_timestamp(date)
+        daynum = datestring_to_daynum(date)
+        #print(daynum)
+        ret_df.loc[ret_df.date==date, 'daynum']=daynum   # NOTE: ret_df[ret_df.date==date, 'daynum'] does NOT work; need to use .loc[]
+        ret_df.loc[ret_df.date==date, 'tstamp']=ts
+
+        if (count % 20)==0:
+            print(f"{count} ",end='');sys.stdout.flush()
+        #end
+        count += 1
     #end
+    print("")
     return ret_df
 
 
@@ -340,14 +365,44 @@ def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_dea
         county=row['county']
         state=row['state']
         # get population for (county, state)
-        pop_index = get_index_county_state(pop_df, county,state)
-        pop=1.0 * pop_df[pop_index][2019].values[0] 
+        try:
+            pop_index = get_index_county_state(pop_df, county,state)
+            pop=1.0 * pop_df[pop_index][2019].values[0] 
 
-        deaths = 1.0 * row['deaths']
-        cases = 1.0 * row['cases']
-        ret_df.loc[index,norm_deaths_name] = deaths/pop
-        ret_df.loc[index,norm_cases_name] = cases/pop
+            deaths = 1.0 * row['deaths']
+            cases = 1.0 * row['cases']
+            ret_df.loc[index,norm_deaths_name] = deaths/pop
+            ret_df.loc[index,norm_cases_name] = cases/pop
+        except:
+            #
+            # exception  occurs when population data not available
+            ret_df.loc[index, norm_deaths_name] = -1.0
+            ret_df.loc[index,norm_cases_name] = -1.0
+        #end
     #end
     print(f"created column {norm_deaths_name}")
     print(f"created column {norm_cases_name}")
     return ret_df
+
+import pickle
+def pickle_dataframes(nyt_df, nyt_fname, pop_df, pop_fname):
+    # save off data
+    #
+    # save off data at this point
+    with open(nyt_fname,mode='wb') as tmpfile:
+        pickle.dump(nyt_df, tmpfile)
+    #end
+
+    with open(pop_fname,mode='wb') as tmpfile:
+        pickle.dump(pop_df, tmpfile)
+    #end
+    return
+
+def unpickle_dataframes(nyt_fname, pop_fname):
+    with open(nyt_fname,'rb') as tmpfile:
+        nyt_df = pickle.load(tmpfile)
+    with open(pop_fname,'rb') as tmpfile:
+        pop_df = pickle.load(tmpfile)
+    #end
+
+    return nyt_df, pop_df
