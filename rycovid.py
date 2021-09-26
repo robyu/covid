@@ -17,7 +17,7 @@ def datestring_to_timestamp(datestring,format='%Y-%m-%d'):
     #print(f"datestring_to_timestamp({datestring})")
     return pd.to_datetime(datestring, format=format)
 
-def calc_delta_over_daynum(df, county, state, srccol, destcol, floorval=0.0):
+def OLDcalc_delta_over_daynum(df, county, state, srccol, destcol, floorval=0.0):
   """
   given a dataframe df and the locale, 
   compute dcases = deltacases = new cases daily
@@ -141,23 +141,41 @@ def calc_growthfactor(df, county, state,destcol='growthfactor'):
 
 #   return filtered
 
-def split_county_state(df):
+def fixup_census_df(df):
     """split county+state into two different columns
     drop county+state column
     return new data frame
     """
     cs_s = df["county+state"]  # a series
     print(len(cs_s))
+
+    ret_df = df.copy()
     
     # each county+state entry has form "county,state"
     # split into list of [ [county, state], ...]
     split_list = [x.split(',') for x in cs_s]
+
+    county_list = [x.split(',')[0] for x in cs_s]
+    state_list = [x.split(',')[1] for x in cs_s]
+
+    #
+    # more fixup
+    county_list = [x.lower() for x in county_list]
+    county_list = [x[1:] for x in county_list]  # get rid of preceding "." in ".foo"
+
+    # dont bother replacing "county" with "" because we also have to do "parish," "municipality," etc
+    
+
+    state_list = [x.lower().strip() for x in state_list]
+    print(f"({state_list[100]})")
     
     # split list into county and state series
-    county_s = pd.Series([x[0] for x in split_list])
-    state_s = pd.Series([x[1] for x in split_list])
+    # county_s = pd.Series(x for x in county_list))
+    # state_s = pd.Series([x for x in state_list))
+    county_s = pd.Series(county_list)
+    state_s = pd.Series(state_list)
+    
     print(len(state_s))    
-    ret_df = df.drop(columns=["county+state"])
     ret_df['county'] = county_s
     ret_df['state'] = state_s
     return ret_df
@@ -211,9 +229,7 @@ def strip_trailing_county(df,colname):
 def do_misc_nyt_fixup(df):
     ret_df = df.copy()
 
-    # 4/6/2020 entries: 'new york city' is entered as 'new york'
-    indices=(df.county=='new york') & (df.county=='new york')
-    ret_df.loc[indices,'county'] = 'new york city'
+
     return ret_df
     
 def do_misc_census_fixup(df):
@@ -221,10 +237,11 @@ def do_misc_census_fixup(df):
     do miscellaneous fix of census data
     """
     ret_df = df.copy()
-    #
-    # 'new york county' -> 'new york city'
-    indices = (df.county.str.contains('new york')) & (df.state=='new york')
-    ret_df.loc[indices,'county'] = 'new york city'
+    # #
+    # # 'new york county' -> 'new york city'
+    # indices = (df.county.str.contains('new york')) & (df.state=='new york')
+    # assert len(indices)==1
+    # ret_df.loc[indices,'county'] = 'new york city'
 
     # kansas city falls into multiple counties!
     # add a new row:  'kansas city' county with population data data from wikipedia
@@ -346,7 +363,7 @@ def filter_rows_by_state_county(df, cs_list):
     #end
     return ret_df
 
-def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_deaths_name='norm_deaths'):
+def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_deaths_name='norm_deaths', per_cap_scalefactor=100e+3):
     """
     given nyt and population (census) dataframes,
     normalize cases by population -> norm_cases
@@ -357,8 +374,10 @@ def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_dea
     ret_df = nyt_df.copy()
     if norm_cases_name not in ret_df:
         ret_df[norm_cases_name] = 0.0
+    #end
     if norm_deaths_name not in ret_df:
-        ret_df[norm_deaths_name] = 00
+        ret_df[norm_deaths_name] = 0.0
+    #end
         
     
     for index,row in ret_df.iterrows():
@@ -367,7 +386,8 @@ def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_dea
         # get population for (county, state)
         try:
             pop_index = get_index_county_state(pop_df, county,state)
-            pop=1.0 * pop_df[pop_index][2019].values[0] 
+            pop= float(pop_df[pop_index][2019].values[0]) / per_cap_scalefactor
+            pop = max(pop, 1.0)
 
             deaths = 1.0 * row['deaths']
             cases = 1.0 * row['cases']
@@ -376,6 +396,7 @@ def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_dea
         except:
             #
             # exception  occurs when population data not available
+            print(f"census data not available for {county}|{state}")
             ret_df.loc[index, norm_deaths_name] = -1.0
             ret_df.loc[index,norm_cases_name] = -1.0
         #end
@@ -385,24 +406,18 @@ def normalize_cases_deaths(nyt_df, pop_df, norm_cases_name='norm_cases',norm_dea
     return ret_df
 
 import pickle
-def pickle_dataframes(nyt_df, nyt_fname, pop_df, pop_fname):
+
+def pickle_dataframe(df, fname):
     # save off data
     #
     # save off data at this point
-    with open(nyt_fname,mode='wb') as tmpfile:
-        pickle.dump(nyt_df, tmpfile)
+    with open(fname,mode='wb') as tmpfile:
+        pickle.dump(df, tmpfile)
     #end
 
-    with open(pop_fname,mode='wb') as tmpfile:
-        pickle.dump(pop_df, tmpfile)
-    #end
-    return
-
-def unpickle_dataframes(nyt_fname, pop_fname):
-    with open(nyt_fname,'rb') as tmpfile:
-        nyt_df = pickle.load(tmpfile)
-    with open(pop_fname,'rb') as tmpfile:
-        pop_df = pickle.load(tmpfile)
+def unpickle_dataframe(fname):
+    with open(fname,'rb') as tmpfile:
+        df = pickle.load(tmpfile)
     #end
 
-    return nyt_df, pop_df
+    return df
